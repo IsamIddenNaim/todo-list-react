@@ -1,5 +1,5 @@
 import React from 'react';
-import {useState,useRef} from "react";
+import {useState,useEffect} from "react";
 import Button from '@material-ui/core/Button';
 import "./todo.css"
 import { makeStyles } from '@material-ui/core/styles';
@@ -12,7 +12,8 @@ import Checkbox from '@material-ui/core/Checkbox';
 import IconButton from '@material-ui/core/IconButton';
 import DeleteIcon from '@material-ui/icons/Delete';
 import TextField from '@material-ui/core/TextField';
-
+// this line to import firebase.firestore as db
+import {db} from "../firebase";
 const useStyles = makeStyles((theme) => ({
   root: {
     width: '100%',
@@ -36,51 +37,84 @@ const useStyles = makeStyles((theme) => ({
 
 export default function TodoList() {
   const classes = useStyles();
+  const [loading,setLoading]= useState(true)
+
+  const [loadingAdding,setLoadingAdding]= useState(false)
   const [newTodo,setNewTodo] = useState("");
   const [todos,setTodos] = useState([])
   const [checked, setChecked] = useState([]);
-  const addTodo = ()=>{
-    setTodos([...todos,newTodo]);
-    setNewTodo("")
-  }
-  const deletTodo = (item)=>{
-    setTodos(todos.filter(x=>x !== item))
-  }
-  const handleToggle = (value) => () => {
-    const currentIndex = checked.indexOf(value);
-    const newChecked = [...checked];
 
-    if (currentIndex === -1) {
-      newChecked.push(value);
-    } else {
-      newChecked.splice(currentIndex, 1);
+  // I used useEffect to run onSnapShot function when this component "TodoList" render first time
+  useEffect(()=>{
+    const fetchData= ()=>{
+      setLoading(true)
+      db.collection("todos").onSnapshot((snapshot)=>{
+        setTodos(snapshot.docs.map((doc)=>{ return {...doc.data(),id:doc.id} }))
+        setLoading(false)
+      },(error)=>{
+        setLoading(false)
+        console.log(error.message)
+      })
     }
+    fetchData()
+  },[])
 
-    setChecked(newChecked);
+  // here is the function to add new task to todos collection in firestore
+  const addTodo = async ()=>{
+    
+    // I used 'loadingAdding' state to disable the add's button when docs still being added.
+    setLoadingAdding(true)
+    await db.collection("todos").add({
+      todoText:newTodo,
+      checked:false
+    }).catch(error=>{
+      console.log(error.message)
+    })
+    setNewTodo("")
+    setLoadingAdding(false)
+  }
+
+
+  // this function to delete task from db
+  const deletTodo = async (idOfTodo)=>{
+    await db.collection('todos').doc(idOfTodo).delete()
+    .catch(error=>{
+      console.log(error.message)
+    })
+  }
+
+  // this function to change check button state
+  const handleToggle = async (idOfTodo) => {
+    await db.collection('todos').doc(idOfTodo).update({
+      checked:!(todos.find(item => item.id === idOfTodo).checked)
+    }).catch(error=>{
+      console.log(error.message)
+    })
   };
-
+  
   return (
     <div className={classes.root}>
     <h1 className="text-center" style={{marginTop:"70px"}}>Todo List</h1>
     <List className={classes.root}>
       {todos.map((item) => {
-        const labelId = `checkbox-list-label-${todos.indexOf(item)}`;
+        const index = todos.indexOf(item);
+        const labelId = `checkbox-list-label-${index}`;
 
         return (
-          <ListItem key={todos.indexOf(item)} role={undefined} dense button onClick={handleToggle(todos.indexOf(item))}>
+          <ListItem key={index} role={undefined} dense button onClick={()=>{handleToggle(item.id)}}>
             <ListItemIcon>
               <Checkbox
                 edge="start"
-                checked={checked.indexOf(todos.indexOf(item)) !== -1}
+                checked={item.checked}
                 tabIndex={-1}
                 disableRipple
                 inputProps={{ 'aria-labelledby': labelId }}
               />
             </ListItemIcon>
-            <ListItemText id={labelId} primary={`${todos.indexOf(item) + 1}- ${item}`} />
+            <ListItemText id={labelId} primary={`${index + 1}- ${item.todoText}`} />
             <ListItemSecondaryAction>
               <IconButton edge="end" aria-label="delete" onClick={()=>{
-                deletTodo(item)
+                deletTodo(item.id)
               }}>
                 <DeleteIcon />
               </IconButton>
@@ -89,7 +123,8 @@ export default function TodoList() {
         );
       })}
     </List>
-    {todos.length<1&&<h2 className="text-center">there is no items</h2>}
+    {(todos.length<1 && !loading)?<h2 className="text-center">there is no items</h2>:
+    (loading)&&<h2 className="text-center">loading..</h2>}
     <div className={classes.inputTodo}>
     <TextField
         className={classes.textInput}
@@ -107,7 +142,7 @@ export default function TodoList() {
         variant="contained"
         color="primary"
         className={classes.button}
-        disabled={!(newTodo)}
+        disabled={(!(newTodo) || loadingAdding)}
         onClick={()=>{
           addTodo()
         }}
